@@ -85,9 +85,17 @@ class scraper:
                         months = range(1,13)
                         timeslug = "%s" % year
                     except ValueError:
-                        year, month = [ int(x) for x in elt.attrib['time_period'].split('-') ]
-                        months = [month] 
-                        timeslug = "%s_%s" % (year, month)
+                        try:
+                            year, month = [ int(x) for x in elt.attrib['time_period'].split('-') ]
+                            months = [month] 
+                            timeslug = "%s_%s" % (year, month)
+                        except:
+                            year, quarter = elt.attrib['time_period'].split('-')
+                            year = int(year)
+                            assert(quarter[0] == 'Q' )
+                            q = int(quarter[1])
+                            months = range(q*3+1,q*3+4) 
+                            timeslug = "%s_%s" % (year, quarter)
 
                     if elt.attrib['value']:
                         value = float(elt.attrib['value'])
