@@ -4,26 +4,29 @@ import lxml.etree as ET
 import lxml.html as lh
 import urllib
 import urllib2
-import csv
 import sys
+import json
+import logging
+from logging import StreamHandler
+
+L = logging.getLogger()
+L.addHandler( StreamHandler() )
+L.setLevel( logging.DEBUG )
 
 class scraper:
     def __init__(self):
         self.browser=mechanize.Browser()
         self.data = []
-        self.columns = set([])
         self.downloaded = 0
         self.max_download = None
 
     def dump(self,filename):
-        self.columns = list(self.columns)
-        self.columns.sort()
-        self.columns.insert(0, 'series')
         f = open(filename,'wt')
-        w = csv.DictWriter(f, self.columns)
-        w.writeheader()
         for d in self.data:
-            w.writerow(d)
+            try:
+                f.write(json.dumps(d)+'\n')
+            except:
+                L.error( "bad data %r" % d )
         f.close()
 
     def scrape_category(self, category_num):
@@ -34,80 +37,111 @@ class scraper:
         urls = [li.attrib['onclick'].split("'")[1] for li in doc.xpath('//li[@onclick]')]
         for url in urls:
             self.parse_url("%s%s" % ("http://www.cbs.gov.il/ts/databank/", url))
-            print "collected %d series" % self.downloaded
-        print "done"
+            L.info( "collected %d series" % self.downloaded )
+        L.info( "%d: done" % category_num if len(urls) > 0 else "%d: nothing to do here" % category_num )
 
     def parse_url(self,url):
         self.browser.open(url)
         self.parse_form()
 
-    def parse_form(self, form_number=0, level=0):
+    def parse_form(self, form_number=0, level=0,slug=""):
         if self.max_download and (self.downloaded > self.max_download):
             return
         try:
             self.browser.select_form(nr=form_number)
         except mechanize.FormNotFoundError:
             content = self.browser.response().read()
-            print "%s  content length %d" % ('    '*level, len(content))
+            #L.info( "%s  content length %d" % ('    '*level, len(content)) )
             doc=lh.fromstring(content)
             params=dict((elt.attrib['name'],elt.attrib['value']) for elt in doc.xpath('//input[@type="hidden"]'))
             params['king_format']=2
             url='http://www.cbs.gov.il/ts/databank/data_ts_format_e.xml'
-            params=urllib.urlencode(dict((p,params[p]) for p in params.keys() if
-                                         p in [ 'king_format', 'tod', 'time_unit_list',
+            params_query=urllib.urlencode(dict((p,params[p]) for p in params.keys() if
+                                          p in [ 'king_format', 'tod', 'time_unit_list',
                                                 'mend', 'yend', 'co_code_list',
                                                 'name_tatser_list', 'ybegin', 'mbegin',
                                                 'code_list', 'co_name_tatser_list', 'level_1',
                                                 'level_2', 'level_3']))
-            self.browser.open(url+'?'+params)
+            self.browser.open(url+'?'+params_query)
             content = self.browser.response().read()
-            print "%s  xml content length %d" % ('    '*level, len(content))
+            #L.info( "%s  xml content length %d" % ('    '*level, len(content)) )
             content = content.replace('iso-8859-8-i','iso-8859-8')
             doc = ET.fromstring(content)
             for series in doc.xpath('/series_ts/Data_Set/Series'):
                 #print(series.attrib)
-                d = {'series': str(series.attrib)}
                 for elt in series.xpath('obs'):
-                    year = int(elt.attrib['time_period'])
+                    metadata = dict([ (k,v) for k,v in series.attrib.iteritems() ])
+                    topics = metadata['name_topic']
+                    topics = topics.split(' - ')
+                    topics = [ x.strip() for x in topics ]
+                    topics.append(metadata['name_ser'].strip())
+                    metadata['topics'] = topics
+                    metadata['title'] = "%(name_topic)s / %(name_ser)s, %(data_kind)s - %(unit_kind)s per %(time_unit)s" % metadata
+                    if 'calc_kind' in metadata.keys():
+                        metadata['title'] += " (%(calc_kind)s)" % metadata
+                    d = {'metadata': dict([ (k,v) for k,v in series.attrib.iteritems() ])}
+                    try:
+                        year = int(elt.attrib['time_period'])
+                        months = range(1,13)
+                        timeslug = "%s" % year
+                    except ValueError:
+                        year, month = [ int(x) for x in elt.attrib['time_period'].split('-') ]
+                        months = [month] 
+                        timeslug = "%s_%s" % (year, month)
+
                     if elt.attrib['value']:
                         value = float(elt.attrib['value'])
                     else:
                         value = None
-                    d[year] = value
-                    self.columns.add(year)
-                self.data.append(d)
+                    d['time'] = { 'year' : year, 'months' : months } 
+                    d['value'] = value
+                    d['slug'] = "%s_%s" % (slug[1:],timeslug)
+                    self.data.append(d)
+#                    print json.dumps(d)
                 self.downloaded += 1
             self.browser.back()
             return
 
-        selects = [x.type=='select' for x in self.browser.form.controls]
+#        for x in self.browser.form.controls:
+#            print x, x.attrs
+            
+        selects = [x for x in self.browser.form.controls if x.type=='select']
 
-        control_name = self.browser.form.controls[-2].attrs['name']
-        if control_name in ['ybegin','yend']:
+        control = selects[-1]
+
+        control_name = control.attrs['name']
+        if control_name in ['ybegin','yend','mbegin','mend']:
             self.browser.submit()
-            self.parse_form(form_number+1, level+1)
+            self.parse_form(form_number+1, level+1, slug)
             self.browser.back()
             return
-        print "%schanging control %s" % ('    '*level, control_name)
-        for option in self.browser.form.controls[-2].items:
-            print "%s  option %s - %s" % ('    '*level,
-                                          option.name,
-                                          option.attrs['label'])
+        L.info( "%schanging control %s" % ('    '*level, control_name) )
+        for option in control.items:
+            if option.name == "0": continue
+            L.info( "%s  option %s - %s" % ('    '*level,
+                                            option.name,
+                                            option.attrs['label']) )
             self.browser.form[control_name] = [option.name]
             self.browser.submit()
-            self.parse_form(form_number+1, level+1)
+            self.parse_form(form_number+1, level+1,slug+"_"+option.attrs['label'].lower().replace(' ','.'))
             self.browser.back()
             self.browser.select_form(nr=form_number)
         return
 
 if __name__ == "__main__":
-    try:
-        category = int(sys.argv[1])
-    except:
-        print "run %s category_id " % sys.argv[0]
-        print "(category_id should be a number. try 24 or 21 for example)"
-        exit(1)
+#    try:
+#        category = int(sys.argv[1])
+#    except:
+#        print "run %s category_id " % sys.argv[0]
+#        print "(category_id should be a number. try 24 or 21 for example)"
+#        exit(1)
     x = scraper()
-    x.scrape_category(category)
-    x.dump('output.csv')
+    for category in range(200):
+        try:
+            x.scrape_category(category)
+        except KeyboardInterrupt:
+            sys.exit(-1)
+        except:
+            L.exception( "%d: failed to parse category" % category )
+    x.dump('output.jsons')
 
