@@ -7,10 +7,17 @@ import urllib2
 import sys
 import json
 import logging
-from logging import StreamHandler
+import cPickle
+from logging import StreamHandler, FileHandler
 
 L = logging.getLogger()
-L.addHandler( StreamHandler() )
+formatter = logging.Formatter("%(asctime)s:%(name)s:%(levelname)s:%(message)s")
+sh = StreamHandler()
+fh = FileHandler( 'run.log' )
+sh.setFormatter(formatter)
+fh.setFormatter(formatter)
+L.addHandler( sh )
+L.addHandler( fh )
 L.setLevel( logging.DEBUG )
 
 class scraper:
@@ -21,17 +28,23 @@ class scraper:
         self.max_download = None
 
     def dump(self,filename):
+        if len(self.data) == 0:
+           L.info('empty data, not creating file')
+           return
+
         f = open(filename,'wt')
         for d in self.data:
             try:
                 f.write(json.dumps(d)+'\n')
             except:
                 L.error( "bad data %r" % d )
+	self.data = []
+	self.downloaded = 0
         f.close()
 
     def scrape_category(self, category_num):
         self.browser.open("http://www.cbs.gov.il/ts/databank/building_func_e.html?level_1=%d"
-                          % category_num)
+                          % category_num, timeout=60)
         content = self.browser.response().read()
         doc = lh.fromstring(content)
         urls = [li.attrib['onclick'].split("'")[1] for li in doc.xpath('//li[@onclick]')]
@@ -137,19 +150,29 @@ class scraper:
         return
 
 if __name__ == "__main__":
-#    try:
-#        category = int(sys.argv[1])
-#    except:
-#        print "run %s category_id " % sys.argv[0]
-#        print "(category_id should be a number. try 24 or 21 for example)"
-#        exit(1)
-    x = scraper()
-    for category in range(200):
-        try:
-            x.scrape_category(category)
-        except KeyboardInterrupt:
-            sys.exit(-1)
-        except:
-            L.exception( "%d: failed to parse category" % category )
-    x.dump('output.jsons')
 
+    try:
+        successful_categories = cPickle.load(file('status'))  
+    except Exception, e:
+        successful_categories = set()
+
+    x = scraper()
+       
+    for category in range(200):
+
+        if category in successful_categories:
+            continue
+        try:
+            L.exception( ">>>> PARSING CATEGORY %d" % category )
+            x.scrape_category(category)
+            x.dump('out/output-%d.jsons' % category)
+            successful_categories.add(category)
+        except KeyboardInterrupt:
+            break
+        except:
+            L.exception( "!!!!!: FAILED TO PARSE CATEGORY %d" % category )
+            x.dump('out/error/output-%d.error.jsons' % category)
+        finally:
+            L.exception( "<<<<< DONE PARSING CATEGORY %d" % category )
+
+    cPickle.dump(successful_categories,file('status','w'))  
