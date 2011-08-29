@@ -170,7 +170,7 @@ if __name__ == "__main__":
         if category in successful_categories:
             continue
         try:
-            L.exception( ">>>> PARSING CATEGORY %d" % category )
+            L.info( ">>>> PARSING CATEGORY %d" % category )
             x.scrape_category(category)
             x.dump('out/output-%d.jsons' % category)
             successful_categories.add(category)
@@ -180,6 +180,6 @@ if __name__ == "__main__":
             L.exception( "!!!!!: FAILED TO PARSE CATEGORY %d" % category )
             x.dump('out/error/output-%d.error.jsons' % category)
         finally:
-            L.exception( "<<<<< DONE PARSING CATEGORY %d" % category )
+            L.info( "<<<<< DONE PARSING CATEGORY %d" % category )
 
     cPickle.dump(successful_categories,file('status','w'))  
