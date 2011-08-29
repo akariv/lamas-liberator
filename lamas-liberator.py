@@ -79,47 +79,54 @@ class scraper:
             content = self.browser.response().read()
             #L.info( "%s  xml content length %d" % ('    '*level, len(content)) )
             content = content.replace('iso-8859-8-i','iso-8859-8')
-            doc = ET.fromstring(content)
-            for series in doc.xpath('/series_ts/Data_Set/Series'):
-                #print(series.attrib)
-                for elt in series.xpath('obs'):
-                    metadata = dict([ (k,v) for k,v in series.attrib.iteritems() ])
-                    topics = metadata['name_topic']
-                    topics = topics.split(' - ')
-                    topics = [ x.strip() for x in topics ]
-                    topics.append(metadata['name_ser'].strip())
-                    metadata['topics'] = topics
-                    metadata['title'] = "%(name_topic)s / %(name_ser)s, %(data_kind)s - %(unit_kind)s per %(time_unit)s" % metadata
-                    if 'calc_kind' in metadata.keys():
-                        metadata['title'] += " (%(calc_kind)s)" % metadata
-                    d = {'metadata': dict([ (k,v) for k,v in series.attrib.iteritems() ])}
-                    try:
-                        year = int(elt.attrib['time_period'])
-                        months = range(1,13)
-                        timeslug = "%s" % year
-                    except ValueError:
+            try:
+                doc = ET.fromstring(content)
+                for series in doc.xpath('/series_ts/Data_Set/Series'):
+                    #print(series.attrib)
+                    for elt in series.xpath('obs'):
+                        metadata = dict([ (k,v) for k,v in series.attrib.iteritems() ])
+                        topics = metadata['name_topic']
+                        topics = topics.split(' - ')
+                        topics = [ x.strip() for x in topics ]
+                        topics.append(metadata['name_ser'].strip())
+                        metadata['topics'] = topics
+                        metadata['title'] = "%(name_topic)s / %(name_ser)s, %(data_kind)s - %(unit_kind)s per %(time_unit)s" % metadata
+                        if 'calc_kind' in metadata.keys():
+                            metadata['title'] += " (%(calc_kind)s)" % metadata
+                        d = {'metadata': dict([ (k,v) for k,v in series.attrib.iteritems() ])}
                         try:
-                            year, month = [ int(x) for x in elt.attrib['time_period'].split('-') ]
-                            months = [month] 
-                            timeslug = "%s_%s" % (year, month)
-                        except:
-                            year, quarter = elt.attrib['time_period'].split('-')
-                            year = int(year)
-                            assert(quarter[0] == 'Q' )
-                            q = int(quarter[1])
-                            months = range(q*3+1,q*3+4) 
-                            timeslug = "%s_%s" % (year, quarter)
-
-                    if elt.attrib['value']:
-                        value = float(elt.attrib['value'])
-                    else:
-                        value = None
-                    d['time'] = { 'year' : year, 'months' : months } 
-                    d['value'] = value
-                    d['slug'] = "%s_%s" % (slug[1:],timeslug)
-                    self.data.append(d)
-#                    print json.dumps(d)
-                self.downloaded += 1
+                            year = int(elt.attrib['time_period'])
+                            months = range(1,13)
+                            timeslug = "%s" % year
+                        except ValueError:
+                            try:
+                                year, month = [ int(x) for x in elt.attrib['time_period'].split('-') ]
+                                months = [month] 
+                                timeslug = "%s_%s" % (year, month)
+                            except:
+                                year, quarter = elt.attrib['time_period'].split('-')
+                                year = int(year)
+                                assert(quarter[0] == 'Q' )
+                                q = int(quarter[1])
+                                months = range(q*3+1,q*3+4) 
+                                timeslug = "%s_%s" % (year, quarter)
+    
+                        if elt.attrib['value']:
+                            value = float(elt.attrib['value'])
+                        else:
+                            value = None
+                        d['time'] = { 'year' : year, 'months' : months } 
+                        d['value'] = value
+                        d['slug'] = "%s_%s" % (slug[1:],timeslug)
+                        self.data.append(d)
+    #                    print json.dumps(d)
+                    self.downloaded += 1
+            except:
+                filename = "out/error/%s" % url
+                L.error("FAILED TO PARSE CONTENT here, dumping to %s" % filename)
+                f = file(filename,'w')
+                f.write(content)
+                f.close()
             self.browser.back()
             return
 
